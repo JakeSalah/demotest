@@ -38,6 +38,7 @@ ENV/
 # Local development
 .env
 client_secret.json
+credentials.json
 token.json
 
 # OS generated files
