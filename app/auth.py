@@ -50,6 +50,8 @@ def get_credentials(scopes: List[str] = None) -> Any:
     if scopes is None:
         scopes = SCOPES
         
+    logger.info(f"Requesting credentials with scopes: {scopes}")
+        
     creds = None
     
     # 1. Try credentials from environment var (base64 encoded)
@@ -74,14 +76,46 @@ def get_credentials(scopes: List[str] = None) -> Any:
             logger.warning(f"Service account auth failed: {e}")
     
     # 3. Try OAuth flow with saved token
-    if os.path.exists(TOKEN_PATH):
+    if not creds and os.path.exists(TOKEN_PATH):
         try:
-            with open(TOKEN_PATH, "r") as tf:
-                creds = Credentials.from_authorized_user_info(json.load(tf), scopes)
-            logger.info(f"Loaded OAuth credentials from {TOKEN_PATH}")
+            # Load the entire token file as JSON
+            with open(TOKEN_PATH, 'r') as token_file:
+                token_data = json.load(token_file)
+                
+            # Check if the token is in the expected format
+            if 'token' in token_data and 'token_uri' in token_data:
+                logger.info("Loading credentials from token.json with token field")
+                creds = Credentials(
+                    token=token_data['token'],
+                    refresh_token=token_data.get('refresh_token'),
+                    token_uri=token_data['token_uri'],
+                    client_id=token_data.get('client_id'),
+                    client_secret=token_data.get('client_secret'),
+                    scopes=scopes
+                )
+            else:
+                # Fall back to the standard method
+                logger.info("Loading credentials using from_authorized_user_file")
+                creds = Credentials.from_authorized_user_file(TOKEN_PATH, scopes)
+                
+            logger.info("Loaded credentials from token file")
+            
         except Exception as e:
             logger.warning(f"Failed to load OAuth token: {e}")
-    
+            
+        # If token is expired, try to refresh it
+        if creds and creds.expired and creds.refresh_token:
+            try:
+                logger.info("Refreshing token...")
+                creds.refresh(Request())
+                logger.info("Successfully refreshed token")
+                # Save the new token
+                with open(TOKEN_PATH, 'w') as token:
+                    token.write(creds.to_json())
+            except Exception as e:
+                logger.error(f"Failed to refresh token: {e}")
+                creds = None
+                
     # 4. Refresh token if expired or get new tokens
     try:
         if not creds or not creds.valid:
